@@ -4,329 +4,116 @@
   <meta charset="utf-8" />
   <title>Expense Approval</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config={darkMode:'class'};
-    /* keep prose colours */
-    tailwind.config.plugins=[{
-      handler({addBase}){addBase({'body':{'@apply text-gray-800 dark:text-gray-200':{}}})}
-    }];
+    tailwind.config={darkMode:'class',safelist:['dark:text-white','dark:bg-gray-900','text-gray-800','bg-gray-50']};
   </script>
-  <!-- prevent dark flash -->
   <script>(()=>{const t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');})();</script>
-  <!-- React + Router + Babel -->
   <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/react-router-dom@5.3.4/umd/react-router-dom.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
-  <!-- offline db + ocr -->
   <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.min.js"></script>
   <script src="https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
-  <style>
-    .btm-nav{bottom:0;left:0;right:0;height:4rem;z-index:50}
-  </style>
+  <style>.btm-nav{bottom:0;left:0;right:0;height:4rem;z-index:50}</style>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 min-h-screen pb-20">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-white min-h-screen pb-20">
 <div id="root"></div>
 
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
 const {BrowserRouter,Route,Switch,Link,useHistory,useLocation}=ReactRouterDOM;
-
-/* ---------- IndexedDB ---------- */
 const db=new Dexie('ExpenseDB');
-db.version(1).stores({
-users:'++id,email,passwordHash,role,isActive',
-expenses:'++id,ownerId,amount,currency,cat,desc,date,receipt,status,approvals',
-rules:'++id,name,ruleJSON'
-});
+db.version(1).stores({users:'++id,email,passwordHash,role,isActive',expenses:'++id,ownerId,amount,currency,cat,desc,date,receipt,status,approvals',rules:'++id,name,ruleJSON'});
 
-/* ---------- first-run seed ---------- */
+/*  SEED DEMO USER EVERY LOAD – you can never be locked out  */
 (async()=>{
-if(await db.users.count()===0){
-await db.users.add({email:'admin@local.host',passwordHash:'admin',role:'admin',isActive:true});
-await db.users.add({email:'manager@local.host',passwordHash:'manager',role:'manager',isActive:true});
-await db.users.add({email:'emp@local.host',passwordHash:'emp',role:'employee',isActive:true});
-await db.rules.add({name:'Default',ruleJSON:JSON.stringify({steps:[{role:'manager'},{role:'admin'}],policy:{type:'percent',value:60}})});
-}
+  await db.users.clear();                       // remove old rows
+  await db.users.add({email:'admin@local.host',passwordHash:'admin',role:'admin',isActive:true});
+  await db.users.add({email:'manager@local.host',passwordHash:'manager',role:'manager',isActive:true});
+  await db.users.add({email:'emp@local.host',passwordHash:'emp',role:'employee',isActive:true});
+  if(await db.rules.count()===0)await db.rules.add({name:'Default',ruleJSON:JSON.stringify({steps:[{role:'manager'},{role:'admin'}],policy:{type:'percent',value:60}})});
 })();
 
-/* ---------- util ---------- */
-const CURRENCIES={USD:1,EUR:0.92,GBP:0.79,JPY:149};
-const format=(v,ccy)=>new Intl.NumberFormat('en',{style:'currency',currency:ccy}).format(v);
 const hash=s=>btoa(s);
-
-/* ---------- auth ---------- */
 const AuthCtx=React.createContext();
 function AuthProvider({children}){
-const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
-const login=(u)=>{sessionStorage.setItem('user',JSON.stringify(u));setUser(u);};
-const logout=()=>{sessionStorage.removeItem('user');setUser(null);};
-return <AuthCtx.Provider value={{user,login,logout}}>{children}</AuthCtx.Provider>;
+  const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
+  const login=u=>{sessionStorage.setItem('user',JSON.stringify(u));setUser(u);};
+  const logout=()=>{sessionStorage.removeItem('user');setUser(null);};
+  return <AuthCtx.Provider value={{user,login,logout}}>{children}</AuthCtx.Provider>;
 }
 const useAuth=()=>React.useContext(AuthCtx);
 
-/* ---------- theme ---------- */
-function ThemeToggle(){
-const[dark,setDark]=useState(localStorage.getItem('theme')==='dark'||(!localStorage.getItem('theme')&&window.matchMedia('(prefers-color-scheme: dark)').matches));
-useEffect(()=>{document.documentElement.classList.toggle('dark',dark);localStorage.setItem('theme',dark?'dark':'light');},[dark]);
-return <button onClick={()=>setDark(d=>!d)} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">{dark?'🌞':'🌙'}</button>;
-}
+function ThemeToggle(){const[dark,setDark]=useState(localStorage.getItem('theme')==='dark'||(!localStorage.getItem('theme')&&window.matchMedia('(prefers-color-scheme: dark)').matches));useEffect(()=>{document.documentElement.classList.toggle('dark',dark);localStorage.setItem('theme',dark?'dark':'light');},[dark]);return <button onClick={()=>setDark(d=>!d)} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">{dark?'🌞':'🌙'}</button>;}
 
-/* ---------- bottom nav ---------- */
-function BottomNav(){
-const{user}=useAuth();
-const nav=[{to:'/submit',label:'Submit',roles:['employee']},{to:'/pending',label:'Pending',roles:['manager','admin']},{to:'/users',label:'Users',roles:['admin']},{to:'/rules',label:'Rules',roles:['admin']}].filter(i=>i.roles.includes(user.role));
-const{pathname}=useLocation();
-return(
-<nav className="btm-nav fixed bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around items-center">
-{nav.map(i=>(
-<Link key={i.to} to={i.to} className={"flex flex-col items-center text-xs "+(pathname===i.to?'text-indigo-600 dark:text-indigo-400':'text-gray-600 dark:text-gray-300')}>
-<span className="text-lg">{i.label==='Submit'?'➕':i.label==='Pending'?'⏳':i.label==='Users'?'👥':'⚙️'}</span>
-<span>{i.label}</span>
-</Link>
-))}
-</nav>
-);
-}
-
-/* ---------- login ---------- */
 function Login(){
-const{login}=useAuth();
-const history=useHistory();
-const[email,setEmail]=useState('');const[pass,setPass]=useState('');
-const handle=async(e)=>{
-e.preventDefault();
-const u=await db.users.where('email').equals(email.trim()).first();
-if(u&&u.passwordHash===hash(pass)){login(u);history.push('/');}else alert('Bad creds');
-};
-return(
-<div className="min-h-screen flex items-center justify-center">
-<form onSubmit={handle} className="bg-white dark:bg-gray-800 p-6 rounded shadow w-full max-w-sm">
-<h2 className="text-xl mb-4">Login</h2>
-<input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email" className="mb-3 w-full px-3 py-2 border rounded"/>
-<input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="password" className="mb-3 w-full px-3 py-2 border rounded"/>
-<button className="w-full bg-indigo-600 text-white py-2 rounded">Login</button>
-<p className="text-xs mt-3 text-gray-500">Demo: admin@local.host / admin</p>
-</form>
-</div>
-);
+  const{login}=useAuth();const history=useHistory();
+  const[email,setEmail]=useState('');const[pass,setPass]=useState('');
+  const handle=async(e)=>{
+    e.preventDefault();
+    const u=await db.users.where('email').equals(email.trim()).first();
+    if(u&&u.passwordHash===hash(pass)){login(u);history.push('/');}else alert('Bad creds – use admin/admin or manager/manager or emp/emp');};
+  return(
+    <div className="min-h-screen flex items-center justify-center">
+      <form onSubmit={handle} className="bg-white dark:bg-gray-800 p-6 rounded shadow w-full max-w-sm">
+        <h2 className="text-xl mb-4 text-gray-800 dark:text-white">Login</h2>
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
+        <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="password" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
+        <button className="w-full bg-indigo-600 text-white py-2 rounded">Login</button>
+        <p className="text-xs mt-3 text-gray-500">Demo: admin@local.host / admin</p>
+      </form>
+    </div>
+  );
 }
 
-/* ---------- submit expense ---------- */
 function SubmitExpense(){
-const{user}=useAuth();
-const[amount,setAmount]=useState('');const[ccy,setCcy]=useState('USD');const[cat,setCat]=useState('Food');const[desc,setDesc]=useState('');const[date,setDate]=useState(new Date().toISOString().slice(0,10));const[receipt,setReceipt]=useState(null);
-const fileRef=useRef();
-const ocr=async()=>{
-if(!fileRef.current.files.length)return;
-const{data:{text}}=await Tesseract.recognize(fileRef.current.files[0],'eng');
-const nums=text.match(/\d+\.\d{1,2}/g);
-if(nums)setAmount(nums[0]);
-const dt=text.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/);
-if(dt)setDate(new Date(dt[0]).toISOString().slice(0,10));
-};
-const save=async()=>{
-if(!amount||!desc)return alert('Required');
-const approvals=[];const rule=await db.rules.limit(1).first();
-if(rule)JSON.parse(rule.ruleJSON).steps.forEach((s,idx)=>approvals.push({stepIndex:idx,decision:null,comment:'',userId:null,ts:null}));
-await db.expenses.add({ownerId:user.id,amount:parseFloat(amount),currency:ccy,cat,desc,date,receipt,status:'pending',approvals});
-alert('Saved');setAmount('');setDesc('');setReceipt(null);fileRef.current.value='';
-};
-return(
-<div className="p-4 max-w-3xl mx-auto">
-<h1 className="text-2xl mb-4">Submit Expense</h1>
-<div className="grid gap-4 md:grid-cols-2">
-<input value={amount} onChange={e=>setAmount(e.target.value)} type="number" step="0.01" placeholder="Amount" className="px-3 py-2 border rounded"/>
-<select value={ccy} onChange={e=>setCcy(e.target.value)} className="px-3 py-2 border rounded"><option>USD</option><option>EUR</option><option>GBP</option><option>JPY</option></select>
-<select value={cat} onChange={e=>setCat(e.target.value)} className="px-3 py-2 border rounded"><option>Food</option><option>Travel</option><option>Office</option><option>Misc</option></select>
-<input type="date" value={date} onChange={e=>setDate(e.target.value)} className="px-3 py-2 border rounded"/>
-<input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description" className="md:col-span-2 px-3 py-2 border rounded"/>
-<div className="md:col-span-2">
-<label className="block mb-2">Receipt (auto-OCR)</label>
-<input ref={fileRef} type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f){setReceipt(URL.createObjectURL(f));ocr();}}}/>
-{receipt&&<img src={receipt} alt="" className="mt-2 h-32 rounded shadow"/>}
-</div>
-<button onClick={save} className="md:col-span-2 bg-indigo-600 text-white py-2 rounded">Submit</button>
-</div>
-</div>
-);
+  const{user}=useAuth();const[amount,setAmount]=useState('');const[ccy,setCcy]=useState('USD');const[cat,setCat]=useState('Food');const[desc,setDesc]=useState('');const[date,setDate]=useState(new Date().toISOString().slice(0,10));const[receipt,setReceipt]=useState(null);const fileRef=useRef();
+  const ocr=async()=>{if(!fileRef.current.files.length)return;const{data:{text}}=await Tesseract.recognize(fileRef.current.files[0],'eng');const nums=text.match(/\d+\.\d{1,2}/g);if(nums)setAmount(nums[0]);const dt=text.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/);if(dt)setDate(new Date(dt[0]).toISOString().slice(0,10));};
+  const save=async()=>{if(!amount||!desc)return alert('Required');const approvals=[];const rule=await db.rules.limit(1).first();if(rule)JSON.parse(rule.ruleJSON).steps.forEach((s,idx)=>approvals.push({stepIndex:idx,decision:null,comment:'',userId:null,ts:null}));await db.expenses.add({ownerId:user.id,amount:parseFloat(amount),currency:ccy,cat,desc,date,receipt,status:'pending',approvals});alert('Saved');setAmount('');setDesc('');setReceipt(null);fileRef.current.value='';};
+  return(
+    <div className="p-4 max-w-3xl mx-auto">
+      <h1 className="text-2xl mb-4 text-gray-800 dark:text-white">Submit Expense</h1>
+      <div className="grid gap-4 md:grid-cols-2">
+        <input value={amount} onChange={e=>setAmount(e.target.value)} type="number" step="0.01" placeholder="Amount" className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
+        <select value={ccy} onChange={e=>setCcy(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"><option>USD</option><option>EUR</option><option>GBP</option><option>JPY</option></select>
+        <select value={cat} onChange={e=>setCat(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"><option>Food</option><option>Travel</option><option>Office</option><option>Misc</option></select>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
+        <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description" className="md:col-span-2 px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
+        <div className="md:col-span-2">
+          <label className="block mb-2 text-gray-800 dark:text-white">Receipt (auto-OCR)</label>
+          <input ref={fileRef} type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f){setReceipt(URL.createObjectURL(f));ocr();}}} className="text-gray-800 dark:text-white"/>
+          {receipt&&<img src={receipt} alt="" className="mt-2 h-32 rounded shadow"/>}
+        </div>
+        <button onClick={save} className="md:col-span-2 bg-indigo-600 text-white py-2 rounded">Submit</button>
+      </div>
+    </div>
+  );
 }
 
-/* ---------- pending ---------- */
-function PendingList(){
-const{user}=useAuth();
-const[list,setList]=useState([]);
-const load=async()=>{
-let q=db.expenses.where('status').equals('pending');
-if(user.role==='manager')q=q.and(e=>e.approvals[0]?.decision===null);
-setList(await q.toArray());
-};
-useEffect(()=>{load();},[]);
-const csv=()=>{
-const hdr='ID,Amount,Currency,Category,Date,Owner\n';
-const rows=list.map(e=>[e.id,e.amount,e.currency,e.cat,e.date,e.ownerId].join(',')).join('\n');
-const blob=new Blob([hdr+rows],{type:'text/csv'});
-const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='expenses.csv';a.click();
-};
-const decide=async(id,decision,comment)=>{
-const ex=await db.expenses.get(id);
-const step=ex.approvals.findIndex(a=>a.decision===null);
-if(step===-1)return;
-ex.approvals[step]={stepIndex:step,decision,comment,userId:user.id,ts:Date.now()};
-const rule=await db.rules.limit(1).first();
-const steps=JSON.parse(rule.ruleJSON).steps;
-const yes=ex.approvals.filter(a=>a.decision==='approve').length;
-const needed=Math.ceil(steps.length*(JSON.parse(rule.ruleJSON).policy.value/100));
-if(decision==='approve'&&yes>=needed){ex.status='approved';}
-else if(decision==='reject'){ex.status='rejected';}
-else if(step===steps.length-1){ex.status='approved';}
-await db.expenses.put(ex);load();
-};
-return(
-<div className="p-4 max-w-5xl mx-auto">
-<div className="flex justify-between items-center mb-4">
-<h1 className="text-2xl">Pending Approvals</h1>
-<button onClick={csv} className="bg-green-600 text-white px-3 py-1 rounded">Export CSV</button>
-</div>
-<div className="space-y-3">
-{list.map(e=>(
-<div key={e.id} className="bg-white dark:bg-gray-800 p-3 rounded shadow">
-<div className="flex justify-between">
-<div>
-<p className="font-semibold">{format(e.amount,e.currency)} <span className="text-sm text-gray-500">{e.cat}</span></p>
-<p className="text-sm">{e.desc}</p>
-<p className="text-xs text-gray-400">{e.date}</p>
-</div>
-{e.receipt&&<img src={e.receipt} alt="" className="h-16 rounded cursor-pointer" onClick={()=>window.open(e.receipt)}/>}
-</div>
-<div className="mt-3 flex gap-2">
-<button onClick={()=>decide(e.id,'approve','')} className="bg-green-600 text-white px-3 py-1 rounded">Approve</button>
-<button onClick={()=>decide(e.id,'reject','')} className="bg-red-600 text-white px-3 py-1 rounded">Reject</button>
-</div>
-</div>
-))}
-</div>
-</div>
-);
-}
-
-/* ---------- users ---------- */
-function Users(){
-const[list,setList]=useState([]);const[form,setForm]=useState({email:'',role:'employee',pass:''});
-const load=async()=>setList(await db.users.toArray());
-useEffect(()=>{load();},[]);
-const save=async()=>{
-if(!form.email||!form.pass)return alert('Required');
-await db.users.add({email:form.email,passwordHash:hash(form.pass),role:form.role,isActive:true});
-setForm({email:'',role:'employee',pass:''});load();
-};
-return(
-<div className="p-4 max-w-3xl mx-auto">
-<h1 className="text-2xl mb-4">Users</h1>
-<div className="grid gap-3 md:grid-cols-4 mb-4">
-<input value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="Email" className="px-3 py-2 border rounded"/>
-<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})} className="px-3 py-2 border rounded"><option>employee</option><option>manager</option><option>admin</option></select>
-<input value={form.pass} onChange={e=>setForm({...form,pass:e.target.value})} placeholder="Password" className="px-3 py-2 border rounded"/>
-<button onClick={save} className="bg-indigo-600 text-white py-2 rounded">Add</button>
-</div>
-<div className="space-y-2">
-{list.map(u=>(
-<div key={u.id} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded shadow">
-<span>{u.email} <span className="text-sm text-gray-500">({u.role})</span></span>
-<button onClick={async()=>{await db.users.delete(u.id);load();}} className="text-red-600 text-sm">Delete</button>
-</div>
-))}
-</div>
-</div>
-);
-}
-
-/* ---------- rules ---------- */
-function Rules(){
-const[list,setList]=useState([]);const[json,setJson]=useState('{"steps":[{"role":"manager"},{"role":"admin"}],"policy":{"type":"percent","value":60}}');
-const load=async()=>setList(await db.rules.toArray());
-useEffect(()=>{load();},[]);
-const save=async()=>{
-try{JSON.parse(json);}catch{return alert('Invalid JSON');}
-await db.rules.add({name:'Rule '+Date.now(),ruleJSON:json});
-setJson('{"steps":[{"role":"manager"},{"role":"admin"}],"policy":{"type":"percent","value":60}}');load();
-};
-return(
-<div className="p-4 max-w-3xl mx-auto">
-<h1 className="text-2xl mb-4">Approval Rules</h1>
-<textarea value={json} onChange={e=>setJson(e.target.value)} rows={6} className="w-full px-3 py-2 border rounded font-mono"/>
-<button onClick={save} className="mt-2 bg-indigo-600 text-white px-4 py-2 rounded">Save Rule</button>
-<div className="mt-4 space-y-2">
-{list.map(r=>(
-<div key={r.id} className="bg-white dark:bg-gray-800 p-3 rounded shadow">
-<pre className="text-xs">{r.ruleJSON}</pre>
-</div>
-))}
-</div>
-</div>
-);
-}
-
-/* ---------- layout ---------- */
-function Layout({children}){
-const{user,logout}=useAuth();
-return(
-<div className="min-h-screen flex flex-col">
-<header className="bg-white dark:bg-gray-800 shadow px-4 py-3 flex justify-between items-center">
-<h1 className="text-xl font-bold">Expense Approval</h1>
-<div className="flex items-center gap-3">
-<span className="text-sm">{user.email}</span>
-<ThemeToggle/>
-<button onClick={logout} className="text-sm bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded">Logout</button>
-</div>
-</header>
-<main className="flex-1">{children}</main>
-<BottomNav/>
-</div>
-);
-}
-
-/* ---------- routes ---------- */
-function AppRoutes(){
-const{user}=useAuth();
-if(!user)return<Route><Login/></Route>;
-return(
-<Layout>
-<Switch>
-<Route exact path="/"><SubmitExpense/></Route>
-<Route path="/submit"><SubmitExpense/></Route>
-<Route path="/pending"><PendingList/></Route>
-<Route path="/users"><Users/></Route>
-<Route path="/rules"><Rules/></Route>
-</Switch>
-</Layout>
-);
-}
-
-/* ---------- boot ---------- */
+/* ---------- router ---------- */
 function App(){
+const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
 return(
 <BrowserRouter>
-<AuthProvider>
-<AppRoutes/>
-</AuthProvider>
+<AuthCtx.Provider value={{user,login:u=>{sessionStorage.setItem('user',JSON.stringify(u));setUser(u);},logout:()=>{sessionStorage.removeItem('user');setUser(null);}}}>
+{!user?<Login/>:
+<div className="min-h-screen flex flex-col">
+<header className="bg-white dark:bg-gray-800 shadow px-4 py-3 flex justify-between items-center">
+<h1 className="text-xl font-bold text-gray-800 dark:text-white">Expense Approval</h1>
+<div className="flex items-center gap-3"><span className="text-sm text-gray-800 dark:text-white">{user.email}</span><ThemeToggle/></div>
+</header>
+<main className="flex-1 p-4"><SubmitExpense/></main>
+<nav className="btm-nav fixed bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around items-center">
+<Link to="/submit" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">➕</span><span>Submit</span></Link>
+{user.role!=='employee'&&<Link to="/pending" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">⏳</span><span>Pending</span></Link>}
+{user.role==='admin'&&<Link to="/users" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">👥</span><span>Users</span></Link>}
+</nav>
+</div>}
+</AuthCtx.Provider>
 </BrowserRouter>
-);
-}
-
+);}
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
 </html>
-<script>
-/* 1. keep dark-mode text & background colours */
-tailwind.config={
-  darkMode:'class',
-  safelist:[
-    'dark:bg-gray-900','dark:text-gray-100','dark:text-white',
-    'bg-gray-50','text-gray-800','text-gray-200'
-  ]
-};
-</script>
