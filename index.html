@@ -6,7 +6,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config={darkMode:'class'};</script>
+  <script>
+    tailwind.config={darkMode:'class'};
+    /* keep prose colours */
+    tailwind.config.plugins=[{
+      handler({addBase}){addBase({'body':{'@apply text-gray-800 dark:text-gray-200':{}}})}
+    }];
+  </script>
   <!-- prevent dark flash -->
   <script>(()=>{const t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');})();</script>
   <!-- React + Router + Babel -->
@@ -21,11 +27,11 @@
     .btm-nav{bottom:0;left:0;right:0;height:4rem;z-index:50}
   </style>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 min-h-screen pb-20">
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen pb-20">
 <div id="root"></div>
 
 <script type="text/babel">
-const {useState,useEffect,useRef,useCallback}=React;
+const {useState,useEffect,useRef}=React;
 const {BrowserRouter,Route,Switch,Link,useHistory,useLocation}=ReactRouterDOM;
 
 /* ---------- IndexedDB ---------- */
@@ -40,6 +46,8 @@ rules:'++id,name,ruleJSON'
 (async()=>{
 if(await db.users.count()===0){
 await db.users.add({email:'admin@local.host',passwordHash:'admin',role:'admin',isActive:true});
+await db.users.add({email:'manager@local.host',passwordHash:'manager',role:'manager',isActive:true});
+await db.users.add({email:'emp@local.host',passwordHash:'emp',role:'employee',isActive:true});
 await db.rules.add({name:'Default',ruleJSON:JSON.stringify({steps:[{role:'manager'},{role:'admin'}],policy:{type:'percent',value:60}})});
 }
 })();
@@ -106,7 +114,7 @@ return(
 );
 }
 
-/* ---------- submit ---------- */
+/* ---------- submit expense ---------- */
 function SubmitExpense(){
 const{user}=useAuth();
 const[amount,setAmount]=useState('');const[ccy,setCcy]=useState('USD');const[cat,setCat]=useState('Food');const[desc,setDesc]=useState('');const[date,setDate]=useState(new Date().toISOString().slice(0,10));const[receipt,setReceipt]=useState(null);
