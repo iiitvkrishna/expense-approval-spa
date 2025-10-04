@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <title>Expense Approval</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <!-- Tailwind + dark -->
+  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>tailwind.config={darkMode:'class'};</script>
   <!-- prevent dark flash -->
   <script>(()=>{const t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');})();</script>
-  <!-- React ecosystem -->
+  <!-- React + Router + Babel -->
   <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/react-router-dom@5.3.4/umd/react-router-dom.min.js"></script>
@@ -17,23 +17,16 @@
   <!-- offline db + ocr -->
   <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.min.js"></script>
   <script src="https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
-  <!-- pull-to-refresh -->
-  <script src="https://unpkg.com/react-simple-pull-to-refresh@2.1.0/dist/index.umd.js"></script>
   <style>
-    /* bottom nav */
     .btm-nav{bottom:0;left:0;right:0;height:4rem;z-index:50}
-    /* receipt modal zoom */
-    .zoomable{cursor:zoom-in;transition:transform .2s}
-    .zoomable.zoomed{cursor:zoom-out;transform:scale(2)}
   </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 min-h-screen pb-20">
 <div id="root"></div>
 
 <script type="text/babel">
-const {useState,useEffect,useRef,useCallback,Fragment}=React;
+const {useState,useEffect,useRef,useCallback}=React;
 const {BrowserRouter,Route,Switch,Link,useHistory,useLocation}=ReactRouterDOM;
-const {PullToRefresh}=window.ReactSimplePullToRefresh;
 
 /* ---------- IndexedDB ---------- */
 const db=new Dexie('ExpenseDB');
@@ -43,12 +36,10 @@ expenses:'++id,ownerId,amount,currency,cat,desc,date,receipt,status,approvals',
 rules:'++id,name,ruleJSON'
 });
 
-/* ---------- seed on first run ---------- */
+/* ---------- first-run seed ---------- */
 (async()=>{
 if(await db.users.count()===0){
 await db.users.add({email:'admin@local.host',passwordHash:'admin',role:'admin',isActive:true});
-await db.users.add({email:'manager@local.host',passwordHash:'manager',role:'manager',isActive:true});
-await db.users.add({email:'emp@local.host',passwordHash:'emp',role:'employee',isActive:true});
 await db.rules.add({name:'Default',ruleJSON:JSON.stringify({steps:[{role:'manager'},{role:'admin'}],policy:{type:'percent',value:60}})});
 }
 })();
@@ -56,10 +47,9 @@ await db.rules.add({name:'Default',ruleJSON:JSON.stringify({steps:[{role:'manage
 /* ---------- util ---------- */
 const CURRENCIES={USD:1,EUR:0.92,GBP:0.79,JPY:149};
 const format=(v,ccy)=>new Intl.NumberFormat('en',{style:'currency',currency:ccy}).format(v);
-const uuid=()=>crypto.randomUUID();
 const hash=s=>btoa(s);
 
-/* ---------- auth context ---------- */
+/* ---------- auth ---------- */
 const AuthCtx=React.createContext();
 function AuthProvider({children}){
 const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
@@ -69,24 +59,11 @@ return <AuthCtx.Provider value={{user,login,logout}}>{children}</AuthCtx.Provide
 }
 const useAuth=()=>React.useContext(AuthCtx);
 
-/* ---------- theme toggle ---------- */
+/* ---------- theme ---------- */
 function ThemeToggle(){
 const[dark,setDark]=useState(localStorage.getItem('theme')==='dark'||(!localStorage.getItem('theme')&&window.matchMedia('(prefers-color-scheme: dark)').matches));
 useEffect(()=>{document.documentElement.classList.toggle('dark',dark);localStorage.setItem('theme',dark?'dark':'light');},[dark]);
-return(
-<button onClick={()=>setDark(d=>!d)} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
-{dark?'🌞':'🌙'}
-</button>
-);
-}
-
-/* ---------- auto logout ---------- */
-function AutoLogout(){
-const{logout}=useAuth();
-const timer=useRef();
-const reset=useCallback(()=>{clearTimeout(timer.current);timer.current=setTimeout(()=>{logout();},15*60*1000);},[logout]);
-useEffect(()=>{reset();const onMove=()=>reset();window.addEventListener('mousemove',onMove);window.addEventListener('keypress',onMove);return()=>{clearTimeout(timer.current);window.removeEventListener('mousemove',onMove);window.removeEventListener('keypress',onMove);};},[reset]);
-return null;
+return <button onClick={()=>setDark(d=>!d)} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">{dark?'🌞':'🌙'}</button>;
 }
 
 /* ---------- bottom nav ---------- */
@@ -97,7 +74,7 @@ const{pathname}=useLocation();
 return(
 <nav className="btm-nav fixed bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around items-center">
 {nav.map(i=>(
-<Link key={i.to} to={i.to} className={"flex flex-col items-center text-xs "+(pathname===i.to?'text-indigo-600 dark:text-indigo-400':'text-gray-600 dark:text-gray-300'))}>
+<Link key={i.to} to={i.to} className={"flex flex-col items-center text-xs "+(pathname===i.to?'text-indigo-600 dark:text-indigo-400':'text-gray-600 dark:text-gray-300')}>
 <span className="text-lg">{i.label==='Submit'?'➕':i.label==='Pending'?'⏳':i.label==='Users'?'👥':'⚙️'}</span>
 <span>{i.label}</span>
 </Link>
@@ -114,15 +91,14 @@ const[email,setEmail]=useState('');const[pass,setPass]=useState('');
 const handle=async(e)=>{
 e.preventDefault();
 const u=await db.users.where('email').equals(email.trim()).first();
-if(u&&u.passwordHash===hash(pass)){login(u);history.push('/');}
-else alert('Bad creds');
+if(u&&u.passwordHash===hash(pass)){login(u);history.push('/');}else alert('Bad creds');
 };
 return(
 <div className="min-h-screen flex items-center justify-center">
 <form onSubmit={handle} className="bg-white dark:bg-gray-800 p-6 rounded shadow w-full max-w-sm">
 <h2 className="text-xl mb-4">Login</h2>
 <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email" className="mb-3 w-full px-3 py-2 border rounded"/>
-<input type="password" value={pass} onSubmit={handle} onChange={e=>setPass(e.target.value)} placeholder="password" className="mb-3 w-full px-3 py-2 border rounded"/>
+<input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="password" className="mb-3 w-full px-3 py-2 border rounded"/>
 <button className="w-full bg-indigo-600 text-white py-2 rounded">Login</button>
 <p className="text-xs mt-3 text-gray-500">Demo: admin@local.host / admin</p>
 </form>
@@ -130,7 +106,7 @@ return(
 );
 }
 
-/* ---------- submit expense ---------- */
+/* ---------- submit ---------- */
 function SubmitExpense(){
 const{user}=useAuth();
 const[amount,setAmount]=useState('');const[ccy,setCcy]=useState('USD');const[cat,setCat]=useState('Food');const[desc,setDesc]=useState('');const[date,setDate]=useState(new Date().toISOString().slice(0,10));const[receipt,setReceipt]=useState(null);
@@ -145,9 +121,8 @@ if(dt)setDate(new Date(dt[0]).toISOString().slice(0,10));
 };
 const save=async()=>{
 if(!amount||!desc)return alert('Required');
-const approvals=[];
-const rule=await db.rules.limit(1).first();
-if(rule)rule.ruleJSON.steps.forEach((s,idx)=>approvals.push({stepIndex:idx,decision:null,comment:'',userId:null,ts:null}));
+const approvals=[];const rule=await db.rules.limit(1).first();
+if(rule)JSON.parse(rule.ruleJSON).steps.forEach((s,idx)=>approvals.push({stepIndex:idx,decision:null,comment:'',userId:null,ts:null}));
 await db.expenses.add({ownerId:user.id,amount:parseFloat(amount),currency:ccy,cat,desc,date,receipt,status:'pending',approvals});
 alert('Saved');setAmount('');setDesc('');setReceipt(null);fileRef.current.value='';
 };
@@ -171,15 +146,14 @@ return(
 );
 }
 
-/* ---------- pending list ---------- */
+/* ---------- pending ---------- */
 function PendingList(){
 const{user}=useAuth();
 const[list,setList]=useState([]);
 const load=async()=>{
 let q=db.expenses.where('status').equals('pending');
 if(user.role==='manager')q=q.and(e=>e.approvals[0]?.decision===null);
-const raw=await q.toArray();
-setList(raw);
+setList(await q.toArray());
 };
 useEffect(()=>{load();},[]);
 const csv=()=>{
@@ -208,7 +182,6 @@ return(
 <h1 className="text-2xl">Pending Approvals</h1>
 <button onClick={csv} className="bg-green-600 text-white px-3 py-1 rounded">Export CSV</button>
 </div>
-<PullToRefresh onRefresh={load}/>
 <div className="space-y-3">
 {list.map(e=>(
 <div key={e.id} className="bg-white dark:bg-gray-800 p-3 rounded shadow">
@@ -231,7 +204,7 @@ return(
 );
 }
 
-/* ---------- users crud ---------- */
+/* ---------- users ---------- */
 function Users(){
 const[list,setList]=useState([]);const[form,setForm]=useState({email:'',role:'employee',pass:''});
 const load=async()=>setList(await db.users.toArray());
@@ -265,7 +238,7 @@ return(
 /* ---------- rules ---------- */
 function Rules(){
 const[list,setList]=useState([]);const[json,setJson]=useState('{"steps":[{"role":"manager"},{"role":"admin"}],"policy":{"type":"percent","value":60}}');
-const load=async()=>setList(await db.rules.toArray()));
+const load=async()=>setList(await db.rules.toArray());
 useEffect(()=>{load();},[]);
 const save=async()=>{
 try{JSON.parse(json);}catch{return alert('Invalid JSON');}
@@ -303,7 +276,6 @@ return(
 </header>
 <main className="flex-1">{children}</main>
 <BottomNav/>
-<AutoLogout/>
 </div>
 );
 }
@@ -329,9 +301,9 @@ return(
 function App(){
 return(
 <BrowserRouter>
-<AuthCtx.Provider value={useAuth()}>
+<AuthProvider>
 <AppRoutes/>
-</AuthCtx.Provider>
+</AuthProvider>
 </BrowserRouter>
 );
 }
