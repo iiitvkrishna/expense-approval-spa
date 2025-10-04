@@ -6,7 +6,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config={darkMode:'class',safelist:['dark:text-white','dark:bg-gray-900','text-gray-800','bg-gray-50']};
+    tailwind.config={
+      darkMode:'class',
+      safelist:['dark:text-gray-100','dark:bg-gray-900','bg-white','text-gray-900']
+    };
   </script>
   <script>(()=>{const t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');})();</script>
   <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
@@ -17,7 +20,7 @@
   <script src="https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
   <style>.btm-nav{bottom:0;left:0;right:0;height:4rem;z-index:50}</style>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-white min-h-screen pb-20">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen pb-20">
 <div id="root"></div>
 
 <script type="text/babel">
@@ -26,9 +29,9 @@ const {BrowserRouter,Route,Switch,Link,useHistory,useLocation}=ReactRouterDOM;
 const db=new Dexie('ExpenseDB');
 db.version(1).stores({users:'++id,email,passwordHash,role,isActive',expenses:'++id,ownerId,amount,currency,cat,desc,date,receipt,status,approvals',rules:'++id,name,ruleJSON'});
 
-/*  SEED DEMO USER EVERY LOAD – you can never be locked out  */
+/*  ⏳  AWAIT seed before React renders  */
 (async()=>{
-  await db.users.clear();                       // remove old rows
+  await db.users.clear();
   await db.users.add({email:'admin@local.host',passwordHash:'admin',role:'admin',isActive:true});
   await db.users.add({email:'manager@local.host',passwordHash:'manager',role:'manager',isActive:true});
   await db.users.add({email:'emp@local.host',passwordHash:'emp',role:'employee',isActive:true});
@@ -57,10 +60,10 @@ function Login(){
   return(
     <div className="min-h-screen flex items-center justify-center">
       <form onSubmit={handle} className="bg-white dark:bg-gray-800 p-6 rounded shadow w-full max-w-sm">
-        <h2 className="text-xl mb-4 text-gray-800 dark:text-white">Login</h2>
-        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
-        <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="password" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
-        <button className="w-full bg-indigo-600 text-white py-2 rounded">Login</button>
+        <h2 className="text-xl mb-4 text-gray-900 dark:text-gray-100">Login</h2>
+        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
+        <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="password" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
+        <button className="w-full bg-indigo-600 text-white py-2 rounded hover:bg-indigo-500 transition">Login</button>
         <p className="text-xs mt-3 text-gray-500">Demo: admin@local.host / admin</p>
       </form>
     </div>
@@ -73,46 +76,47 @@ function SubmitExpense(){
   const save=async()=>{if(!amount||!desc)return alert('Required');const approvals=[];const rule=await db.rules.limit(1).first();if(rule)JSON.parse(rule.ruleJSON).steps.forEach((s,idx)=>approvals.push({stepIndex:idx,decision:null,comment:'',userId:null,ts:null}));await db.expenses.add({ownerId:user.id,amount:parseFloat(amount),currency:ccy,cat,desc,date,receipt,status:'pending',approvals});alert('Saved');setAmount('');setDesc('');setReceipt(null);fileRef.current.value='';};
   return(
     <div className="p-4 max-w-3xl mx-auto">
-      <h1 className="text-2xl mb-4 text-gray-800 dark:text-white">Submit Expense</h1>
+      <h1 className="text-2xl mb-4 text-gray-900 dark:text-gray-100">Submit Expense</h1>
       <div className="grid gap-4 md:grid-cols-2">
-        <input value={amount} onChange={e=>setAmount(e.target.value)} type="number" step="0.01" placeholder="Amount" className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
-        <select value={ccy} onChange={e=>setCcy(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"><option>USD</option><option>EUR</option><option>GBP</option><option>JPY</option></select>
-        <select value={cat} onChange={e=>setCat(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"><option>Food</option><option>Travel</option><option>Office</option><option>Misc</option></select>
-        <input type="date" value={date} onChange={e=>setDate(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
-        <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description" className="md:col-span-2 px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-800 dark:text-white"/>
+        <input value={amount} onChange={e=>setAmount(e.target.value)} type="number" step="0.01" placeholder="Amount" className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
+        <select value={ccy} onChange={e=>setCcy(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"><option>USD</option><option>EUR</option><option>GBP</option><option>JPY</option></select>
+        <select value={cat} onChange={e=>setCat(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"><option>Food</option><option>Travel</option><option>Office</option><option>Misc</option></select>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} className="px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
+        <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description" className="md:col-span-2 px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
         <div className="md:col-span-2">
-          <label className="block mb-2 text-gray-800 dark:text-white">Receipt (auto-OCR)</label>
-          <input ref={fileRef} type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f){setReceipt(URL.createObjectURL(f));ocr();}}} className="text-gray-800 dark:text-white"/>
+          <label className="block mb-2 text-gray-900 dark:text-gray-100">Receipt (auto-OCR)</label>
+          <input ref={fileRef} type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(f){setReceipt(URL.createObjectURL(f));ocr();}}} className="text-gray-900 dark:text-gray-100"/>
           {receipt&&<img src={receipt} alt="" className="mt-2 h-32 rounded shadow"/>}
         </div>
-        <button onClick={save} className="md:col-span-2 bg-indigo-600 text-white py-2 rounded">Submit</button>
+        <button onClick={save} className="md:col-span-2 bg-indigo-600 text-white py-2 rounded hover:bg-indigo-500 transition">Submit</button>
       </div>
     </div>
   );
 }
 
-/* ---------- router ---------- */
+/* ---------- router & boot ---------- */
 function App(){
-const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
-return(
-<BrowserRouter>
-<AuthCtx.Provider value={{user,login:u=>{sessionStorage.setItem('user',JSON.stringify(u));setUser(u);},logout:()=>{sessionStorage.removeItem('user');setUser(null);}}}>
-{!user?<Login/>:
-<div className="min-h-screen flex flex-col">
-<header className="bg-white dark:bg-gray-800 shadow px-4 py-3 flex justify-between items-center">
-<h1 className="text-xl font-bold text-gray-800 dark:text-white">Expense Approval</h1>
-<div className="flex items-center gap-3"><span className="text-sm text-gray-800 dark:text-white">{user.email}</span><ThemeToggle/></div>
-</header>
-<main className="flex-1 p-4"><SubmitExpense/></main>
-<nav className="btm-nav fixed bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around items-center">
-<Link to="/submit" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">➕</span><span>Submit</span></Link>
-{user.role!=='employee'&&<Link to="/pending" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">⏳</span><span>Pending</span></Link>}
-{user.role==='admin'&&<Link to="/users" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">👥</span><span>Users</span></Link>}
-</nav>
-</div>}
-</AuthCtx.Provider>
-</BrowserRouter>
-);}
+  const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
+  return(
+  <BrowserRouter>
+    <AuthCtx.Provider value={{user,login:u=>{sessionStorage.setItem('user',JSON.stringify(u));setUser(u);},logout:()=>{sessionStorage.removeItem('user');setUser(null);}}}>
+      {!user?<Login/>:
+      <div className="min-h-screen flex flex-col">
+        <header className="bg-white/80 dark:bg-gray-800/80 backdrop-blur shadow px-4 py-3 flex justify-between items-center">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Expense Approval</h1>
+          <div className="flex items-center gap-3"><span className="text-sm text-gray-700 dark:text-gray-300">{user.email}</span><ThemeToggle/></div>
+        </header>
+        <main className="flex-1 p-4"><SubmitExpense/></main>
+        <nav className="btm-nav fixed bg-white/70 dark:bg-gray-800/70 backdrop-blur border-t border-gray-200 dark:border-gray-700 flex justify-around items-center">
+          <Link to="/submit" className="flex flex-col items-center text-xs text-indigo-600 dark:text-indigo-400"><span className="text-lg">➕</span><span>Submit</span></Link>
+          {user.role!=='employee'&&<Link to="/pending" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">⏳</span><span>Pending</span></Link>}
+          {user.role==='admin'&&<Link to="/users" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">👥</span><span>Users</span></Link>}
+        </nav>
+      </div>}
+    </AuthCtx.Provider>
+  </BrowserRouter>
+  );
+}
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
