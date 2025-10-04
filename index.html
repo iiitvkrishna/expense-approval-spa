@@ -1,113 +1,1041 @@
-<!DOCTYPE html>
-<html lang="en" class="">
-<head>
-  <meta charset="utf-8" />
-  <title>Expense Approval</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config={darkMode:'class',safelist:['dark:text-gray-100','dark:bg-gray-900','bg-white','text-gray-900']};(()=>{const t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark');})();</script>
-  <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/react-router-dom@5.3.4/umd/react-router-dom.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
-  <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.min.js"></script>
-  <script src="https://unpkg.com/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
-  <style>.btm-nav{bottom:0;left:0;right:0;height:4rem;z-index:50}</style>
-</head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen pb-20">
-<div id="root"></div>
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Expense Approval SPA</title>
 
-<script type="text/babel">
-const {useState,useEffect,useRef}=React;
-const {BrowserRouter,Route,Switch,Link,useHistory}=ReactRouterDOM;
+    <!-- Tailwind CDN (dark mode via class strategy) -->
+    <script>
+      // Initialise theme before first paint
+      (function () {
+        const saved = localStorage.getItem("theme");
+        const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const isDark = saved ? saved === "dark" : prefersDark;
+        document.documentElement.classList.toggle("dark", isDark);
+      })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: { extend: { borderRadius: { soft: "0.75rem" } } },
+      };
+    </script>
 
-/* ----------  DB + SEED (blocking)  ---------- */
-const db=new Dexie('ExpenseDB');
-db.version(1).stores({users:'++id,email,passwordHash,role,isActive',expenses:'++id,ownerId,amount,currency,cat,desc,date,receipt,status,approvals',rules:'++id,name,ruleJSON'});
+    <!-- React, ReactDOM, Router (UMD) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-router-dom@6/umd/react-router-dom.production.min.js"></script>
 
-let DB_READY=false; // global lock
-const SEED=async()=>{
-  await db.open();
-  await db.users.clear(); // always start fresh
-  await db.users.add({email:'admin@local.host',passwordHash:'admin',role:'admin',isActive:true});
-  await db.users.add({email:'manager@local.host',passwordHash:'manager',role:'manager',isActive:true});
-  await db.users.add({email:'emp@local.host',passwordHash:'emp',role:'employee',isActive:true});
-  if(await db.rules.count()===0)await db.rules.add({name:'Default',ruleJSON:JSON.stringify({steps:[{role:'manager'},{role:'admin'}],policy:{type:'percent',value:60}})});
-  DB_READY=true;
-  console.log('✅  Demo users seeded – admin/admin etc.');
-};  
-SEED(); // run immediately
+    <!-- Dexie (IndexedDB) -->
+    <script src="https://unpkg.com/dexie@3/dist/dexie.min.js"></script>
 
-const hash=s=>btoa(s);
+    <!-- Tesseract.js -->
+    <script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
 
-/* ----------  AUTH  ---------- */
-const AuthCtx=React.createContext();
-function AuthProvider({children}){
-  const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
-  const login=u=>{sessionStorage.setItem('user',JSON.stringify(u));setUser(u);};
-  const logout=()=>{sessionStorage.removeItem('user');setUser(null);};
-  return <AuthCtx.Provider value={{user,login,logout}}>{children}</AuthCtx.Provider>;
-}
-const useAuth=()=>React.useContext(AuthCtx);
+    <!-- react-simple-pull-to-refresh UMD -->
+    <script src="https://unpkg.com/react-simple-pull-to-refresh@1.3.1/dist/index.umd.js"></script>
 
-/* ----------  LOGIN  ---------- */
-function Login(){
-  const{login}=useAuth();const history=useHistory();
-  const[email,setEmail]=useState('');const[pass,setPass]=useState('');
-  const handle=async(e)=>{
-    e.preventDefault();
-    if(!DB_READY){alert('DB still initialising – wait 1 s and retry');return;}
-    const u=await db.users.where('email').equals(email.trim()).first();
-    if(u&&u.passwordHash===hash(pass)){login(u);history.push('/');}else alert('Bad creds – use admin/admin or manager/manager or emp/emp');};
-  return(
-    <div className="min-h-screen flex items-center justify-center">
-      <form onSubmit={handle} className="bg-white dark:bg-gray-800 p-6 rounded shadow w-full max-w-sm">
-        <h2 className="text-xl mb-4 text-gray-900 dark:text-gray-100">Login</h2>
-        <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="email" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
-        <input type="password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="password" className="mb-3 w-full px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
-        <button className="w-full bg-indigo-600 text-white py-2 rounded">Login</button>
-        <p className="text-xs mt-3 text-gray-500">Demo: admin@local.host / admin</p>
-      </form>
-    </div>
-  );
-}
+    <!-- Babel Stand-alone for in-browser TSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
 
-/* ----------  SUBMIT (simple stub)  ---------- */
-function SubmitExpense(){
-  const{user}=useAuth();const[amount,setAmount]=useState('');const[ccy,setCcy]=useState('USD');const[desc,setDesc]=useState('');const save=async()=>{if(!amount||!desc)return alert('Required');await db.expenses.add({ownerId:user.id,amount:parseFloat(amount),currency:ccy,cat:'Food',desc,date:new Date().toISOString().slice(0,10),receipt:null,status:'pending',approvals:[]});alert('Saved');setAmount('');setDesc('');};return(
-    <div className="p-4 max-w-3xl mx-auto">
-      <h1 className="text-2xl mb-4 text-gray-900 dark:text-gray-100">Submit Expense</h1>
-      <input value={amount} onChange={e=>setAmount(e.target.value)} type="number" step="0.01" placeholder="Amount" className="w-full mb-3 px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
-      <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Description" className="w-full mb-3 px-3 py-2 border rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"/>
-      <button onClick={save} className="bg-indigo-600 text-white px-4 py-2 rounded">Submit</button>
-    </div>
-  );
-}
+  <body class="h-full bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+    <div id="root" class="h-full"></div>
 
-/* ----------  ROUTER  ---------- */
-function App(){
-  const[user,setUser]=useState(()=>JSON.parse(sessionStorage.getItem('user')||'null'));
-  return(
-  <BrowserRouter>
-    <AuthProvider>
-      {!user?<Login/>:
-      <div className="min-h-screen flex flex-col">
-        <header className="bg-white/80 dark:bg-gray-800/80 backdrop-blur shadow px-4 py-3 flex justify-between items-center">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Expense Approval</h1>
-          <div className="flex items-center gap-3"><span className="text-sm text-gray-700 dark:text-gray-300">{user.email}</span><button onClick={()=>{sessionStorage.removeItem('user');setUser(null)}} className="text-sm bg-gray-200 dark:bg-gray-700 px-3 py-1 rounded">Logout</button></div>
-        </header>
-        <main className="flex-1 p-4"><SubmitExpense/></main>
-        <nav className="btm-nav fixed bg-white/70 dark:bg-gray-800/70 backdrop-blur border-t border-gray-200 dark:border-gray-700 flex justify-around items-center">
-          <Link to="/submit" className="flex flex-col items-center text-xs text-indigo-600 dark:text-indigo-400"><span className="text-lg">➕</span><span>Submit</span></Link>
-          {user.role!=='employee'&&<Link to="/pending" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">⏳</span><span>Pending</span></Link>}
-          {user.role==='admin'&&<Link to="/users" className="flex flex-col items-center text-xs text-gray-600 dark:text-gray-300"><span className="text-lg">👥</span><span>Users</span></Link>}
-        </nav>
-      </div>}
-    </AuthProvider>
-  </BrowserRouter>
-  );
-}
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
-</script>
-</body>
-</html>
+    <script type="text/babel" data-presets="typescript,react">
+      /* @ts-nocheck */
+      const { useState, useEffect, useMemo, useRef, createContext, useContext, Fragment } = React;
+      const { createRoot } = ReactDOM;
+      const { HashRouter, Routes, Route, Link, Navigate, useNavigate, useLocation } = ReactRouterDOM;
+
+      const PullToRefresh = window.ReactSimplePullToRefresh?.default || window.ReactSimplePullToRefresh || null;
+
+      /* ----------  utils  ---------- */
+      const currencyRates = { USD: 1, EUR: 0.92, GBP: 0.79, JPY: 149 };
+      const formatCurrency = (amt, cur) =>
+        new Intl.NumberFormat(undefined, { style: "currency", currency: cur }).format(amt);
+      const toUSD = (amt, cur) => amt / (currencyRates[cur] || 1);
+      const nowISO = () => new Date().toISOString();
+
+      async function hashPassword(pw) {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
+        return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+      }
+
+      function exportCSVFromItems(fileBaseName, items) {
+        const h = ["id","ownerId","amount","currency","amountUsd","category","description","date","merchant","status","currentStepIndex","createdAt","updatedAt"];
+        const esc = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+        const rows = [h.join(",")].concat((items||[]).map(it => h.map(f => esc(it[f])).join(",")));
+        const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8" });
+        const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${fileBaseName}.csv` });
+        a.click(); URL.revokeObjectURL(a.href);
+      }
+
+      /* ----------  DB  ---------- */
+      class AppDB extends Dexie {
+        constructor() {
+          super("expense-approval-spa");
+          this.version(1).stores({
+            kv: "key",
+            users: "++id,email,role,isActive",
+            rules: "++id,name",
+            expenses: "++id,ownerId,status,currentStepIndex,date,currency,category",
+          });
+          this.kv = this.table("kv");
+          this.users = this.table("users");
+          this.rules = this.table("rules");
+          this.expenses = this.table("expenses");
+        }
+      }
+      const db = new AppDB();
+
+      async function seedIfFirstRun() {
+        if ((await db.kv.get("seeded"))?.value) return;
+        await db.kv.put({ key: "companyName", value: "LocalCorp" });
+        await db.users.add({ email: "admin@local.host",  passwordHash: await hashPassword("admin"),  role: "admin",  isActive: true, createdAt: nowISO() });
+        await db.users.add({ email: "manager@local.host",passwordHash: await hashPassword("manager"),role: "manager",isActive: true, createdAt: nowISO() });
+        await db.users.add({ email: "employee@local.host",passwordHash: await hashPassword("employee"),role: "employee",isActive: true, createdAt: nowISO() });
+        await db.rules.add({ name: "Default Two-Step", ruleJSON: JSON.stringify({ steps: [{ role: "manager" }, { role: "admin" }], policy: { type: "percent", value: 60 } }, null, 2) });
+        await db.kv.put({ key: "seeded", value: true });
+      }
+
+      /* ----------  contexts  ---------- */
+      const ThemeContext = createContext({ theme: "light", toggle: () => {} });
+      function ThemeProvider({ children }) {
+        const [theme, setTheme] = useState(() => document.documentElement.classList.contains("dark") ? "dark" : "light");
+        useEffect(() => { document.documentElement.classList.toggle("dark", theme === "dark"); localStorage.setItem("theme", theme); }, [theme]);
+        return <ThemeContext.Provider value={{ theme, toggle: () => setTheme(p => p === "dark" ? "light" : "dark") }}>{children}</ThemeContext.Provider>;
+      }
+      const useTheme = () => useContext(ThemeContext);
+
+      const ToastContext = createContext({ notify: () => {} });
+      function ToastProvider({ children }) {
+        const [toasts, setToasts] = useState([]);
+        const notify = ({ title = "Notice", message = "", type = "info", timeout = 3000 }) => {
+          const id = Math.random().toString(36).slice(2);
+          setToasts(p => [...p, { id, title, message, type }]);
+          setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), timeout);
+        };
+        const typeClass = t => ({
+          success: "border-green-400",
+          error: "border-red-400",
+          warning: "border-amber-400",
+        }[t] || "border-indigo-400");
+        return (
+          <ToastContext.Provider value={{ notify }}>
+            {children}
+            <div className="fixed bottom-4 right-4 space-y-2 z-50">
+              {toasts.map(t => (
+                <div key={t.id} className={`rounded-soft p-3 shadow-lg w-72 bg-white/90 dark:bg-gray-900/90 backdrop-blur border ${typeClass(t.type)}`}>
+                  <div className="font-medium">{t.title}</div>
+                  {t.message && <div className="text-xs opacity-80">{t.message}</div>}
+                </div>
+              ))}
+            </div>
+          </ToastContext.Provider>
+        );
+      }
+      const useToast = () => useContext(ToastContext);
+
+      const AuthContext = createContext({ user: null, token: null, signIn: async () => false, signOut: () => {} });
+      function AuthProvider({ children }) {
+        const [user, setUser] = useState(null);
+        const [token, setToken] = useState(null);
+        const { notify } = useToast();
+        const signIn = async (email, password) => {
+          const u = await db.users.where("email").equals(email).first();
+          if (!u || !u.isActive) { notify({ title: "Login failed", message: "User not found or inactive.", type: "error" }); return false; }
+          if ((await hashPassword(password)) !== u.passwordHash) { notify({ title: "Login failed", message: "Invalid credentials.", type: "error" }); return false; }
+          const tkn = btoa(JSON.stringify({ sub: u.id, role: u.role, email: u.email, iat: Date.now() }));
+          setUser(u); setToken(tkn);
+          notify({ title: "Welcome", message: `Logged in as ${u.email}`, type: "success" });
+          return true;
+        };
+        const signOut = () => { setUser(null); setToken(null); };
+        return <AuthContext.Provider value={{ user, token, signIn, signOut }}>{children}</AuthContext.Provider>;
+      }
+      const useAuth = () => useContext(AuthContext);
+
+      /* ----------  UI  ---------- */
+      const Card = ({ title, children, actions }) => (
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-4 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-balance">{title}</h2>
+            {actions}
+          </div>
+          <div>{children}</div>
+        </div>
+      );
+
+      const Badge = ({ status }) => {
+        const map = {
+          pending: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200 border border-amber-200/60 dark:border-amber-700/50",
+          approved: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200 border border-green-200/60 dark:border-green-700/50",
+          rejected: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200 border border-red-200/60 dark:border-red-700/50",
+        };
+        return <span className={`px-2 py-1 rounded-full text-xs font-medium ${map[status] || "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"}`}>{status}</span>;
+      };
+
+      const Button = ({ children, className = "", ...p }) => (
+        <button {...p} className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed ${className}`}>{children}</button>
+      );
+
+      const OutlineButton = ({ children, className = "", ...p }) => (
+        <button {...p} className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium border border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 ${className}`}>{children}</button>
+      );
+
+      const TextInput = (props) => <input {...props} className={`w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${props.className||""}`} />;
+      const Select = (props) => <select {...props} className={`w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${props.className||""}`} />;
+      const TextArea = (props) => <textarea {...props} className={`w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${props.className||""}`} />;
+
+      function Modal({ open, onClose, title, children }) {
+        if (!open) return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/50" onClick={onClose}></div>
+            <div className="relative z-10 w-[92vw] max-w-2xl bg-white dark:bg-gray-900 rounded-soft p-4 border border-gray-200 dark:border-gray-800">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-semibold">{title}</h3>
+                <button onClick={onClose} className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">&times;</button>
+              </div>
+              {children}
+            </div>
+          </div>
+        );
+      }
+
+      const Skeleton = ({ className = "" }) => <div className={`animate-pulse bg-gray-200 dark:bg-gray-800 rounded ${className}`} />;
+
+      function ImageLightbox({ src, onClose, title = "Receipt" }) {
+        const ref = useRef(null);
+        const [scale, setScale] = useState(1);
+        const start = useRef({ dist: 0, initScale: 1 });
+        useEffect(() => {
+          const el = ref.current;
+          if (!el) return;
+          const getD = (t1, t2) => Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+          const onTS = e => { if (e.touches.length === 2) start.current = { dist: getD(e.touches[0], e.touches[1]), initScale: scale }; };
+          const onTM = e => { if (e.touches.length === 2) { e.preventDefault(); const d = getD(e.touches[0], e.touches[1]); setScale(Math.min(5, Math.max(1, (d / start.current.dist) * start.current.initScale))); } };
+          const onW = e => { if (!e.ctrlKey) return; e.preventDefault(); setScale(s => Math.min(5, Math.max(1, s - e.deltaY * 0.01))); };
+          el.addEventListener("touchstart", onTS, { passive: false });
+          el.addEventListener("touchmove", onTM, { passive: false });
+          el.addEventListener("wheel", onW, { passive: false });
+          return () => { el.removeEventListener("touchstart", onTS); el.removeEventListener("touchmove", onTM); el.removeEventListener("wheel", onW); };
+        }, [scale]);
+        return (
+          <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center">
+            <button aria-label="Close" onClick={onClose} className="absolute top-4 right-4 text-white text-2xl">&times;</button>
+            <div ref={ref} className="w-full h-full flex items-center justify-center overflow-hidden">
+              <img src={src || "/placeholder.svg"} alt={title} className="max-w-none" style={{ transform: `scale(${scale})`, transition: "transform 80ms ease-out" }} />
+            </div>
+          </div>
+        );
+      }
+
+      /* ----------  approval engine  ---------- */
+      async function getActiveRule() { const all = await db.rules.toArray(); return all[0] || null; }
+      function parseRuleJSON(r) { try { return JSON.parse(r.ruleJSON); } catch { return { steps: [], policy: { type: "percent", value: 100 } }; } }
+      function evaluateStepSatisfaction(approvals, stepIndex, policy) {
+        const step = approvals.filter(a => a.stepIndex === stepIndex);
+        const approved = step.filter(a => a.decision === "approved").length;
+        if (policy?.type === "absolute") return approved >= (policy.value || 1);
+        return step.length ? (approved / step.length) * 100 >= (policy.value || 100) : false;
+      }
+      async function advanceIfSatisfied(exp) {
+        const rule = parseRuleJSON(await getActiveRule());
+        if (!evaluateStepSatisfaction(exp.approvals || [], exp.currentStepIndex || 0, rule.policy)) return exp;
+        const next = (exp.currentStepIndex || 0) + 1;
+        if (next >= (rule.steps?.length || 0)) {
+          exp.status = "approved";
+        } else {
+          exp.currentStepIndex = next;
+        }
+        exp.updatedAt = nowISO();
+        await db.expenses.update(exp.id, exp);
+        return exp;
+      }
+
+      /* ----------  layout  ---------- */
+      function Header() {
+        const { user, signOut } = useAuth();
+        const { theme, toggle } = useTheme();
+        const [company, setCompany] = useState("LocalCorp");
+        useEffect(() => { db.kv.get("companyName").then(v => setCompany(v?.value || "LocalCorp")); }, []);
+        return (
+          <header className="sticky top-0 z-40 border-b border-gray-200 dark:border-gray-800 bg-white/80 dark:bg-gray-950/80 backdrop-blur">
+            <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-lg bg-indigo-600"></div>
+                <div className="font-semibold">{company}</div>
+              </div>
+              <nav className="flex items-center gap-2">
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/">Home</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/employee">Employee</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/manager">Manager</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/admin">Admin</Link>
+              </nav>
+              <div className="flex items-center gap-2">
+                <OutlineButton onClick={toggle} title="Toggle dark mode">{theme === "dark" ? "Light" : "Dark"}</OutlineButton>
+                {user ? (
+                  <>
+                    <span className="text-sm opacity-80 hidden sm:inline">{user.email}</span>
+                    <Button onClick={signOut}>Sign out</Button>
+                  </>
+                ) : (
+                  <Link to="/login"><Button>Sign in</Button></Link>
+                )}
+              </div>
+            </div>
+          </header>
+        );
+      }
+
+      function SidebarNav() {
+        const loc = useLocation();
+        const link = (to, label) => (
+          <Link to={to} className={`block px-3 py-2 rounded-md text-sm ${loc.pathname === to ? "bg-indigo-600 text-white" : "hover:bg-indigo-50 dark:hover:bg-gray-800"}`}>{label}</Link>
+        );
+        return (
+          <aside className="hidden md:block fixed top-14 bottom-0 left-0 w-56 border-r border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-gray-950/70 backdrop-blur p-3">
+            <div className="space-y-1">{link("/employee", "Employee")}{link("/manager", "Manager")}{link("/admin", "Admin")}</div>
+          </aside>
+        );
+      }
+
+      function BottomNav() {
+        const loc = useLocation();
+        const item = (to, label, d) => (
+          <Link to={to} className="flex flex-col items-center justify-center flex-1 py-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" className={loc.pathname === to ? "text-indigo-600" : "text-gray-500"}><path fill="currentColor" d={d} /></svg>
+            <span className={`text-[11px] ${loc.pathname === to ? "text-indigo-600" : "text-gray-500"}`}>{label}</span>
+          </Link>
+        );
+        return (
+          <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+            <div className="flex items-stretch justify-between px-2" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+              {item("/employee", "Employee", "M12 2L3 9h3v10h6V13h2v6h6V9h3L12 2z")}
+              {item("/manager", "Manager", "M4 4h16v4H4V4zm0 6h10v10H4V10zm12 0h4v10h-4V10z")}
+              {item("/admin", "Admin", "M3 5h18v2H3V5zm2 4h14v2H5V9zm-2 4h18v2H3v-2zm2 4h14v2H5v-2z")}
+            </div>
+          </nav>
+        );
+      }
+
+      const RequireAuth = ({ children, roles }) => {
+        const { user } = useAuth();
+        const location = useLocation();
+        if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+        if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+        return children;
+      };
+
+      /* ----------  pages  ---------- */
+      function LoginPage() {
+        const nav = useNavigate();
+        const { signIn } = useAuth();
+        const [email, setEmail] = useState("employee@local.host");
+        const [pw, setPw] = useState("employee");
+        const submit = async e => { e.preventDefault(); if (await signIn(email.trim(), pw)) nav("/"); };
+        return (
+          <main className="max-w-md mx-auto p-4">
+            <Card title="Sign in">
+              <form onSubmit={submit} className="space-y-3">
+                <div><label className="block text-sm mb-1">Email</label><TextInput type="email" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+                <div><label className="block text-sm mb-1">Password</label><TextInput type="password" value={pw} onChange={e => setPw(e.target.value)} required /></div>
+                <Button type="submit" className="w-full">Sign in</Button>
+                <div className="text-xs opacity-75">Demo: admin@local.host / admin ‑ manager@local.host / manager ‑ employee@local.host / employee</div>
+              </form>
+            </Card>
+          </main>
+        );
+      }
+
+      function HomePage() {
+        const { user } = useAuth();
+        const [c, setC] = useState({ t: 0, p: 0, a: 0, r: 0 });
+        useEffect(() => { db.expenses.toArray().then(arr => setC({ t: arr.length, p: arr.filter(e => e.status === "pending").length, a: arr.filter(e => e.status === "approved").length, r: arr.filter(e => e.status === "rejected").length })); }, []);
+        return (
+          <main className="max-w-6xl mx-auto p-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Total</div><div className="text-2xl font-semibold">{c.t}</div></div>
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Pending</div><div className="text-2xl font-semibold text-amber-600">{c.p}</div></div>
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Approved</div><div className="text-2xl font-semibold text-green-600">{c.a}</div></div>
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Rejected</div><div className="text-2xl font-semibold text-red-600">{c.r}</div></div>
+            </div>
+            <Card title="Welcome" actions={<Link to="/employee"><Button>New Expense</Button></Link>}>
+              <p className="text-sm leading-relaxed text-pretty">{user ? `Signed in as ${user.email} (${user.role})` : "Please sign in to continue."}</p>
+              <ul className="mt-3 text-sm list-disc pl-5 space-y-1">
+                <li>Dark-mode toggle in header (persists in localStorage).</li>
+                <li>Submit expenses with receipt OCR to auto-fill fields.</li>
+                <li>Managers/Admins approve per rule policy; status badges indicate state.</li>
+                <li>Export all expenses to CSV from Admin.</li>
+              </ul>
+            </Card>
+          </main>
+        );
+      }
+
+      function EmployeePage() {
+        const { user } = useAuth();
+        const { notify } = useToast();
+        const [amount, setAmount] = useState("");
+        const [currency, setCurrency] = useState("USD");
+        const [category, setCategory] = useState("Meals");
+        const [desc, setDesc] = useState("");
+        const [date, setDate] = useState("");
+        const [merchant, setMerchant] = useState("");
+        const [receipt, setReceipt] = useState("");
+        const [ocrLoading, setOcrLoading] = useState(false);
+        const [ocrProg, setOcrProg] = useState(0);
+        const [list, setList] = useState([]);
+        const [view, setView] = useState("");
+
+        const load = async () => setList((await db.expenses.where("ownerId").equals(user.id).reverse().sortBy("createdAt")).reverse());
+        gap-2">
+                <div className="h-8 w-8 rounded-lg bg-indigo-600"></div>
+                <div className="font-semibold">{company}</div>
+              </div>
+              <nav className="flex items-center gap-2">
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/">Home</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/employee">Employee</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/manager">Manager</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/admin">Admin</Link>
+              </nav>
+              <div className="flex items-center gap-2">
+                <OutlineButton onClick={toggle} title="Toggle dark mode">{theme === "dark" ? "Light" : "Dark"}</OutlineButton>
+                {user ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm opacity-80 hidden sm:inline">{user.email}</span>
+                    <Button onClick={signOut}>Sign out</Button>
+                  </div>
+                ) : (
+                  <Link to="/login"><Button>Sign in</Button></Link>
+                )}
+              </div>
+            </div>
+          </header>
+        );
+      }
+
+      function SidebarNav() {
+        const loc = useLocation();
+        const link = (to, label) => (
+          <Link to={to} className={`block px-3 py-2 rounded-md text-sm ${loc.pathname === to ? "bg-indigo-600 text-white" : "hover:bg-indigo-50 dark:hover:bg-gray-800"}`}>{label}</Link>
+        );
+        return (
+          <aside className="hidden md:block fixed top-14 bottom-0 left-0 w-56 border-r border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-gray-950/70 backdrop-blur p-3">
+            <div className="space-y-1">{link("/employee","Employee")}{link("/manager","Manager")}{link("/admin","Admin")}</div>
+          </aside>
+        );
+      }
+
+      function BottomNav() {
+        const loc = useLocation();
+        const item = (to, label, iconPath) => (
+          <Link to={to} className="flex flex-col items-center justify-center flex-1 py-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" className={loc.pathname === to ? "text-indigo-600" : "text-gray-500"}><path d={iconPath} fill="currentColor" /></svg>
+            <span className={`text-[11px] ${loc.pathname === to ? "text-indigo-600" : "text-gray-500"}`}>{label}</span>
+          </Link>
+        );
+        return (
+          <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+            <div className="flex items-stretch justify-between px-2" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+              {item("/employee","Employee","M12 2L3 9h3v10h6V13h2v6h6V9h3L12 2z")}
+              {item("/manager","Manager","M4 4h16v4H4V4zm0 6h10v10H4V10zm12 0h4v10h-4V10z")}
+              {item("/admin","Admin","M3 5h18v2H3V5zm2 4h14v2H5V9zm-2 4h18v2H3v-2zm2 4h14v2H5v-2z")}
+            </div>
+          </nav>
+        );
+      }
+
+      /* ----------  auth guard  ---------- */
+      function RequireAuth({ children, roles }) {
+        const { user } = useAuth();
+        const loc = useLocation();
+        if (!user) return <Navigate to="/login" state={{ from: loc }} replace />;
+        if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+        return children;
+      }
+
+      /* ----------  pages  ---------- */
+      function LoginPage() {
+        const nav = useNavigate();
+        const { signIn } = useAuth();
+        const [email, setEmail] = useState("employee@local.host");
+        const [password, setPassword] = useState("employee");
+        const onSubmit = async (e) => {
+          e.preventDefault();
+          const ok = await signIn(email.trim(), password);
+          if (ok) nav("/");
+        };
+        return (
+          <main className="max-w-md mx-auto p-4">
+            <Card title="Sign in">
+              <form onSubmit={onSubmit} className="space-y-3">
+                <div>
+                  <label className="block text-sm mb-1">Email</label>
+                  <TextInput type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">Password</label>
+                  <TextInput type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+                </div>
+                <Button type="submit" className="w-full">Sign in</Button>
+                <div className="text-xs opacity-75">Demo accounts: admin@local.host/admin, manager@local.host/manager, employee@local.host/employee</div>
+              </form>
+            </Card>
+          </main>
+        );
+      }
+
+      function HomePage() {
+        const { user } = useAuth();
+        const [counts, setCounts] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 });
+        useEffect(() => {
+          db.expenses.toArray().then(arr => setCounts({
+            total: arr.length,
+            pending: arr.filter(e => e.status === "pending").length,
+            approved: arr.filter(e => e.status === "approved").length,
+            rejected: arr.filter(e => e.status === "rejected").length,
+          }));
+        }, []);
+        return (
+          <main className="max-w-6xl mx-auto p-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {["total","pending","approved","rejected"].map(k => (
+                <div key={k} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3">
+                  <div className="text-xs opacity-70">{k[0].toUpperCase()+k.slice(1)}</div>
+                  <div className={`text-2xl font-semibold ${k==="pending"?"text-amber-600":k==="approved"?"text-green-600":k==="rejected"?"text-red-600":""}`}>{counts[k]}</div>
+                </div>
+              ))}
+            </div>
+            <Card title="Welcome" actions={<Link to="/employee"><Button>New Expense</Button></Link>}>
+              <p className="text-sm leading-relaxed text-pretty">{user ? `Signed in as ${user.email} (${user.role})` : "Please sign in to continue."}</p>
+              <ul className="mt-3 text-sm list-disc pl-5 space-y-1">
+                <li>Dark-mode toggle in header (persists in localStorage).</li>
+                <li>Submit expenses with receipt OCR to auto-fill fields.</li>
+                <li>Managers/Admins approve per rule policy; status badges indicate state.</li>
+                <li>Export all expenses to CSV from Admin.</li>
+              </ul>
+            </Card>
+          </main>
+        );
+      }
+
+      function EmployeePage() {
+        const { user } = useAuth();
+        const { notify } = useToast();
+        const [amount, setAmount] = useState("");
+        const [currency, setCurrency] = useState("USD");
+        const [category, setCategory] = useState("Meals");
+        const [description, setDescription] = useState("");
+        const [date, setDate] = useState("");
+        const [merchant, setMerchant] = useState("");
+        const [receiptDataUrl, setReceiptDataUrl] = useState("");
+        const [ocrLoading, setOcrLoading] = useState(false);
+        const [ocrProgress, setOcrProgress] = useState(0);
+        const [myExpenses, setMyExpenses] = useState([]);
+        const [viewImg, setViewImg] = useState("");
+
+        const loadMine = async () => setMyExpenses(await db.expenses.where("ownerId").equals(user.id).reverse().sortBy("createdAt"));
+        useEffect(() => { loadMine(); }, []);
+
+        const onFile = (file) => {
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = e => setReceiptDataUrl(e.target.result);
+          reader.readAsDataURL(file);
+        };
+
+        const runOCR = async () => {
+          if (!receiptDataUrl) return;
+          setOcrLoading(true);
+          setOcrProgress(0);
+          try {
+            const { data } = await Tesseract.recognize(receiptDataUrl, "eng", {
+              logger: m => { if (m.status === "recognizing text" && m.progress != null) setOcrProgress(Math.round(m.progress * 100)); }
+            });
+            const text = data?.text || "";
+            const amtMatch = text.match(/(\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})|\d+\.\d{2})/);
+            if (amtMatch && !amount) setAmount(amtMatch[0].replace(/[,\s]/g, ""));
+            const dateMatch = text.match(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})/);
+            if (dateMatch && !date) setDate(dateMatch[1].replace(/\./g, "-"));
+            const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+            if (lines.length && !merchant) setMerchant(lines[0].slice(0, 64));
+            notify({ title: "OCR complete", message: "Fields auto-filled where possible.", type: "success" });
+          } catch (e) {
+            notify({ title: "OCR failed", message: String(e), type: "error" });
+          } finally { setOcrLoading(false); }
+        };
+
+        const submit = async (e) => {
+          e.preventDefault();
+          if (!amount || !currency || !category || !date) {
+            notify({ title: "Missing fields", message: "Please complete required fields.", type: "warning" });
+            return;
+          }
+          const amt = parseFloat(String(amount).replace(",", ""));
+          await db.expenses.add({
+            ownerId: user.id,
+            amount: amt,
+            currency,
+            amountUsd: toUSD(amt, currency),
+            category,
+            description,
+            date,
+            merchant,
+            receiptDataUrl,
+            status: "pending",
+            currentStepIndex: 0,
+            approvals: [],
+            createdAt: nowISO(),
+            updatedAt: nowISO(),
+          });
+          notify({ title: "Submitted", message: "Expense created.", type: "success" });
+          setAmount(""); setDescription(""); setDate(""); setMerchant(""); setReceiptDataUrl("");
+          await loadMine();
+        };
+
+        const ListContent = () => (
+          <div className="space-y-3">
+            {myExpenses.length === 0 ? (
+              <div className="text-sm opacity-70">You have no expenses yet.</div>
+            ) : myExpenses.map(exp => (
+              <div key={exp.id} className="flex items-center justify-between gap-3 p-3 rounded-md border border-gray-200 dark:border-gray-800">
+                <div className="min-w-0">
+                  <div className="font-medium text-pretty">{formatCurrency(exp.amount, exp.currency)} • {exp.category}</div>
+                  <div className="text-xs opacity-80">{exp.date} • USD eq: {formatCurrency(exp.amountUsd, "USD")} • <Badge status={exp.status} /></div>
+                  {exp.description && <div className="text-sm mt-1 opacity-90">{exp.description}</div>}
+                  {exp.merchant && <div className="text-xs opacity-70">Merchant: {exp.merchant}</div>}
+                </div>
+                {exp.receiptDataUrl && (
+                  <button className="text-indigo-600 hover:underline text-sm" onClick={() => setViewImg(exp.receiptDataUrl)}>View receipt</button>
+                )}
+              </div>
+            ))}
+          </div>
+        );
+
+        return (
+          <main className="max-w-6xl mx-auto p-4 space-y-4">
+            <Card title="New Expense">
+              <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm mb-1">Amount</label>
+                  <TextInput type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">Currency</label>
+                  <Select value={currency} onChange={e => setCurrency(e.target.value)}>
+                    {Object.keys(currencyRates).map(c => <option key={c} value={c}>{c}</option>)}
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">Category</label>
+                  <Select value={category} onChange={e => setCategory(e.target.value)}>
+                    {["Meals", "Travel", "Lodging", "Office", "Other"].map(c => <option key={c} value={c}>{c}</option>)}
+                  </Select>
+                </div>
+                <div>
+                  <label className="block text-sm mb-1">Date</label>
+                  <TextInput type="date" value={date} onChange={e => setDate(e.target.value)} required />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm mb-1">Description</label>
+                  <TextInput value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. Team lunch with client" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm mb-1">Merchant</label>
+                  <TextInput value={merchant} onChange={e => setMerchant(e.target.value)} placeholder="Optional" />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm mb-1">Receipt image</label>
+                  <div className="flex items-center gap-3">
+                    <input type="file" accept="image/*" onChange={e => onFile(e.target.files?.[0])} />
+                    <OutlineButton type="button" onClick={runOCR} disabled={!receiptDataUrl || ocrLoading}>{ocrLoading ? `OCR ${ocrProgress}%` : "Run OCR"}</OutlineButton>
+                  </div>
+                  <div className="mt-3">
+                    {ocrLoading ? (
+                      <div className="grid grid-cols-3 gap-2">
+                        <Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" />
+                      </div>
+                    ) : receiptDataUrl ? (
+                      <img src={receiptDataUrl} alt="Receipt preview" className="h-32 rounded-md border border-gray-200 dark:border-gray-800 object-contain" />
+                    ) : (
+                      <div className="text-sm opacity-70">No image selected.</div>
+                    )}
+                  </div>
+                </div>
+                <div className="sm:col-span-2">
+                  <Button type="submit">Submit Expense</Button>
+                </div>
+              </form>
+            </Card>
+
+            <Card title="My Expenses" actions={
+              <OutlineButton title="Export CSV" onClick={() => exportCSVFromItems("my-expenses", myExpenses)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" className="text-indigo-600"><path fill="currentColor" d="M5 20h14v-2H5v2zM12 2l5 5h-3v6h-4V7H7l5-5z"/></svg>
+                <span className="sr-only">Export CSV</span>
+              </OutlineButton>
+            }>
+              {PullToRefresh ? (
+                <PullToRefresh onRefresh={async () => { await loadMine(); }} pullingContent={<div className="py-2 text-xs opacity-70 text-center">Pull to refresh…</div>} refreshingContent={<div className="py-2 text-xs opacity-70 text-center">Refreshing…</div>}>
+                  <ListContent />
+                </PullToRefresh>
+              ) : <ListContent />}
+            </Card>
+
+            {viewImg ? <ImageLightbox src={viewImg} onClose={() => setViewImg("")} /> : null}
+          </main>
+        );
+      }
+
+      function ManagerPage() {
+        const { user } = useAuth();
+        const { notify } = useToast();
+        const [items, setItems] = useState([]);
+        const [rule, setRule] = useState(null);
+        const [viewImg, setViewImg] = useState("");
+
+        const load = async () => {
+          const active = await getActiveRule();
+          const r = active ? parseRuleJSON(active) : null;
+          setRule(r);
+          const all = await db.expenses.where("status").equals("pending").toArray();
+          setItems(all.filter(e => (r?.steps?.[e.currentStepIndex || 0])?.role === "manager"));
+        };
+        useEffect(() => { load(); }, [user]);
+
+        const act = async (exp, decision) => {
+          const comment = decision === "approved" ? "Approved" : prompt("Add a gap-2"><div className="h-8 w-8 rounded-lg bg-indigo-600"></div><div className="font-semibold">{company}</div></div>
+              <nav className="flex items-center gap-2">
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/">Home</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/employee">Employee</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/manager">Manager</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/admin">Admin</Link>
+              </nav>
+              <div className="flex items-center gap-2">
+                <OutlineButton onClick={toggle} title="Toggle dark mode">{theme === "dark" ? "Light" : "Dark"}</OutlineButton>
+                {user ? (
+                  <div className="flex items-center gap-2"><span className="text-sm opacity-80 hidden sm:inline">{user.email}</span><Button onClick={signOut}>Sign out</Button></div>
+                ) : (
+                  <Link to="/login"><Button>Sign in</Button></Link>
+                )}
+              </div>
+            </div>
+          </header>
+        );
+      }
+
+      function SidebarNav() {
+        const loc = useLocation();
+        const link = (to, label) => (
+          <Link to={to} className={`block px-3 py-2 rounded-md text-sm ${loc.pathname === to ? "bg-indigo-600 text-white" : "hover:bg-indigo-50 dark:hover:bg-gray-800"}`}>{label}</Link>
+        );
+        return (
+          <aside className="hidden md:block fixed top-14 bottom-0 left-0 w-56 border-r border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-gray-950/70 backdrop-blur p-3">
+            <div className="space-y-1">{link("/employee","Employee")}{link("/manager","Manager")}{link("/admin","Admin")}</div>
+          </aside>
+        );
+      }
+
+      function BottomNav() {
+        const loc = useLocation();
+        const item = (to, label, d) => (
+          <Link to={to} className="flex flex-col items-center justify-center flex-1 py-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" className={loc.pathname === to ? "text-indigo-600" : "text-gray-500"}><path d={d} fill="currentColor" /></svg>
+            <span className={`text-[11px] ${loc.pathname === to ? "text-indigo-600" : "text-gray-500"}`}>{label}</span>
+          </Link>
+        );
+        return (
+          <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur">
+            <div className="flex items-stretch justify-between px-2" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+              {item("/employee","Employee","M12 2L3 9h3v10h6V13h2v6h6V9h3L12 2z")}
+              {item("/manager","Manager","M4 4h16v4H4V4zm0 6h10v10H4V10zm12 0h4v10h-4V10z")}
+              {item("/admin","Admin","M3 5h18v2H3V5zm2 4h14v2H5V9zm-2 4h18v2H3v-2zm2 4h14v2H5v-2z")}
+            </div>
+          </nav>
+        );
+      }
+
+      function RequireAuth({ children, roles }) {
+        const { user } = useAuth();
+        const loc = useLocation();
+        if (!user) return <Navigate to="/login" state={{ from: loc }} replace />;
+        if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+        return children;
+      }
+
+      /* ----------  pages  ---------- */
+      function LoginPage() {
+        const nav = useNavigate();
+        const { signIn } = useAuth();
+        const [email, setEmail] = useState("employee@local.host");
+        const [pw, setPw] = useState("employee");
+        const onSubmit = async e => { e.preventDefault(); if (await signIn(email.trim(), pw)) nav("/"); };
+        return (
+          <main className="max-w-md mx-auto p-4">
+            <Card title="Sign in">
+              <form onSubmit={onSubmit} className="space-y-3">
+                <div><label className="block text-sm mb-1">Email</label><TextInput type="email" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+                <div><label className="block text-sm mb-1">Password</label><TextInput type="password" value={pw} onChange={e => setPw(e.target.value)} required /></div>
+                <Button type="submit" className="w-full">Sign in</Button>
+                <div className="text-xs opacity-75">Demo: admin@local.host/admin, manager@local.host/manager, employee@local.host/employee</div>
+              </form>
+            </Card>
+          </main>
+        );
+      }
+
+      function HomePage() {
+        const { user } = useAuth();
+        const [counts, setCounts] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 });
+        useEffect(() => {
+          db.expenses.toArray().then(arr => setCounts({ total: arr.length, pending: arr.filter(e => e.status === "pending").length, approved: arr.filter(e => e.status === "approved").length, rejected: arr.filter(e => e.status === "rejected").length }));
+        }, []);
+        return (
+          <main className="max-w-6xl mx-auto p-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {["Total","Pending","Approved","Rejected"].map(l => (
+                <div key={l} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3">
+                  <div className="text-xs opacity-70">{l}</div>
+                  <div className={`text-2xl font-semibold ${l === "Pending" ? "text-amber-600" : l === "Approved" ? "text-green-600" : l === "Rejected" ? "text-red-600" : ""}`}>{counts[l.toLowerCase()]}</div>
+                </div>
+              ))}
+            </div>
+            <Card title="Welcome" actions={<Link to="/employee"><Button>New Expense</Button></Link>}>
+              <p className="text-sm leading-relaxed text-pretty">{user ? `Signed in as ${user.email} (${user.role})` : "Please sign in to continue."}</p>
+              <ul className="mt-3 text-sm list-disc pl-5 space-y-1">
+                <li>Dark-mode toggle in header (persists in localStorage).</li>
+                <li>Submit expenses with receipt OCR to auto-fill fields.</li>
+                <li>Managers/Admins approve per rule policy; status badges indicate state.</li>
+                <li>Export all expenses to CSV from Admin.</li>
+              </ul>
+            </Card>
+          </main>
+        );
+      }
+
+      function EmployeePage() {
+        const { user } = useAuth();
+        const { notify } = useToast();
+        const [amount, setAmount] = useState("");
+        const [currency, setCurrency] = useState("USD");
+        const [category, setCategory] = useState("Meals");
+        const [description, setDescription] = useState("");
+        const [date, setDate] = useState("");
+        const [merchant, setMerchant] = useState("");
+        const [receipt, setReceipt] = useState("");
+        const [ocrLoading, setOcrLoading] = useState(false);
+        const [ocrProgress, setOcrProgress] = useState(0);
+        const [list, setList] = useState([]);
+        const [viewImg, setViewImg] = useState("");
+
+        const load = async () => setList((await db.expenses.where("ownerId").equals(user.id).reverse().sortBy("createdAt")).reverse());
+        useEffect(() => { load(); }, []);
+
+        const onFile = f => { if (!f) return; const r = new FileReader(); r.onload = e => setReceipt(e.target.result); r.readAsDataURL(f); };
+        const runOCR = async () => {
+          if (!receipt) return;
+          setOcrLoading(true);
+          setOcrProgress(0);
+          try {
+            const { data } = await Tesseract.recognize(receipt, "eng", {
+              logger: m => { if (m.status === "recognizing text" && m.progress != null) setOcrProgress(Math.round(m.progress * 100)); }
+            });
+            const text = data.text;
+            const amt = text.match(/(\d{1,3}(?:[,\s]\d{3})*(?:\.\d{2})|\d+\.\d{2})/);
+            if (amt && !amount) setAmount(amt[0].replace(/[,\s]/g, ""));
+            const d = text.match(/(\d{4}[-/]\d{2}[-/]\d{2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})/);
+            if (d && !date) setDate(d[1].replace(/\./g, "-"));
+            const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+            if (lines.length && !merchant) setMerchant(lines[0].slice(0, 64));
+            notify({ title: "OCR complete", message: "Fields auto-filled where possible.", type: "success" });
+          } catch (e) {
+            notify({ title: "OCR failed", message: String(e), type: "error" });
+          } finally { setOcrLoading(false); }
+        };
+
+        const submit = async e => {
+          e.preventDefault();
+          if (!amount || !currency || !category || !date) return notify({ title: "Missing fields", message: "Please complete required fields.", type: "warning" });
+          const amt = parseFloat(String(amount).replace(",", ""));
+          const id = await db.expenses.add({
+            ownerId: user.id, amount: amt, currency, amountUsd: toUSD(amt, currency), category, description, date, merchant, receiptDataUrl: receipt, status: "pending", currentStepIndex: 0, approvals: [], createdAt: nowISO(), updatedAt: nowISO()
+          });
+          notify({ title: "Submitted", message: `Expense #${id} created.`, type: "success" });
+          setAmount(""); setDescription(""); setDate(""); setMerchant(""); setReceipt("");
+          await load();
+        };
+
+        const renderList = () => (
+          <div className="space-y-3">
+            {list.length === 0 ? (
+              <div className="text-sm opacity-70">You have no expenses yet.</div>
+            ) : list.map(exp => (
+              <div key={exp.id} className="flex items-center justify-between gap-3 p-3 rounded-md border border-gray-200 dark:border-gray-800">
+                <div className="min-w-0">
+                  <div className="font-medium text-pretty">{formatCurrency(exp.amount, exp.currency)} • {exp.category}</div>
+                  <div className="text-xs opacity-80">{exp.date} • USD eq: {formatCurrency(exp.amountUsd, "USD")} • <Badge status={exp.status} /></div>
+                  {exp.description && <div className="text-sm mt-1 opacity-90">{exp.description}</div>}
+                  {exp.merchant && <div className="text-xs opacity-70">Merchant: {exp.merchant}</div>}
+                </div>
+                {exp.receiptDataUrl && <button className="text-indigo-600 hover:underline text-sm" onClick={() => setViewImg(exp.receiptDataUrl)}>View receipt</button>}
+              </div>
+            ))}
+          </div>
+        );
+
+        return (
+          <main className="max-w-6xl mx-auto p-4 space-y-4">
+            <Card title="New Expense">
+              <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div><label className="block text-sm mb-1">Amount</label><TextInput type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></div>
+                <div><label className="block text-sm mb-1">Currency</label><Select value={currency} onChange={e => setCurrency(e.target.value)}>{Object.keys(currencyRates).map(c => <option key={c} value={c}>{c}</option>)}</Select></div>
+                <div><label className="block text-sm mb-1">Category</label><Select value={category} onChange={e => setCategory(e.target.value)}>{["Meals", "Travel", "Lodging", "Office", "Other"].map(c => <option key={c} value={c}>{c}</option>)}</Select></div>
+                <div><label className="block text-sm mb-1">Date</label><TextInput type="date" value={date} onChange={e => setDate(e.target.value)} required /></div>
+                <div className="sm:col-span-2"><label className="block text-sm mb-1">Description</label><TextInput value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. Team lunch with client" /></div>
+                <div className="sm:col-span-2"><label className="block text-sm mb-1">Merchant</label><TextInput value={merchant} onChange={e => setMerchant(e.target.value)} placeholder="Optional" /></div>
+                <div className="sm:col-span-2">
+                  <label className="block text-sm mb-1">Receipt image</label>
+                  <div className="flex items-center gap-3"><input type="file" accept="image/*" onChange={e => onFile(e.target.files?.[0])} /><OutlineButton type="button" onClick={runOCR} disabled={!receipt || ocrLoading}>{ocrLoading ? `OCR ${ocrProgress}%` : "Run OCR"}</OutlineButton></div>
+                  <div className="mt-3">{ocrLoading ? <div className="grid grid-cols-3 gap-2"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div> : receipt ? <img src={receipt} alt="Receipt preview" className="h-32 rounded-md border border-gray-200 dark:border-gray-800 object-contain" /> : <div className="text-sm opacity-70">No image selected.</div>}</div>
+                </div>
+                <div className="sm:col-span-2"><Button type="submit">Submit Expense</Button></div>
+              </form>
+            </Card>
+            <Card title="My Expenses" actions={<OutlineButton title="Export CSV" onClick={() => exportCSVFromItems("my-expenses", list)}><svg width="16" height="16" viewBox="0 0 24 24" className="text-indigo-600"><path fill="currentColor" d="M5 20h14v-2H5v2zM12 2l5 5h-3v6h-4V7H7l5-5z"/></svg><span className="sr-only">Export CSV</span></OutlineButton>}>
+              {PullToRefresh ? (
+                <PullToRefresh onRefresh={load} pullingContent={<div className="py-2 text-xs opacity-70 text-center">Pull to refresh…</div>} refreshingContent={<div className="py-2 text-xs opacity-70 text-center">Refreshing…</div>}>{renderList()}</PullToRefresh>
+              ) : renderList()}
+            </Card>
+            {viewImg ? <ImageLightbox src={viewImg} onClose={() => setViewImg("")} /> : null}
+          </main>
+        );
+      }
+
+      function ManagerPage() {
+        const { user } = useAuth();
+        const { notify } = useToast();
+        const [items, setItems] = useState([]);
+        const [rule, setRule] = useState(null);
+        const [viewImg, setViewImg] = useState("");
+
+        const load = async () => {
+          const active = await getActiveRule();
+          setRule(parseRuleJSON(active));
+          const all = await db.expenses.where("status").equals("pending").toArray();
+          setItems(all.filter(e => (rule?.steps?.[e.currentStepIndex || 0]?.role) === "manager"));
+        };
+        useEffect(() => { load(); }, [user]);
+
+        const act = async (exp, decision) => {
+          const comment = decision === "approved" ? "Approved" : prompt("Add a rejection comment:", "") || "Rejected";
+          const approvals = [...(exp.approvals || []), { stepIndex: exp.currentStepIndex || 0, userId: user.id, decision, comment, ts: nowISO() }];
+          if (decision === "rejected") {
+            await db.expenses.update(exp.id, { approvals, status: "rejected", updatedAt: nowISO() });
+            notify({ title: "Rejected", message: `Expense #${exp.id} rejected.`, type: "error" });
+          } else {
+            await db.expenses.update(exp.id, { approvals, updatedAt: nowISO() });
+            await advanceIfSatisfied(await db.expenses.get(exp.id));
+            notify({ title: "Recorded", message: `Approval recorded for #${exp.id}.`, type: "success" });
+          }
+          await load();
+        };
+
+        const renderList = () => (
+          <div className="space-y-3">
+            {items.length === 0 ? (
+              <div className gap-2"><div className="h-8 w-8 rounded-lg bg-indigo-600"></div><div className="font-semibold">{company}</div></div>
+              <nav className="flex items-center gap-2">
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/">Home</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/employee">Employee</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/manager">Manager</Link>
+                <Link className="px-3 py-2 text-sm hover:text-indigo-600" to="/admin">Admin</Link>
+              </nav>
+              <div className="flex items-center gap-2">
+                <OutlineButton onClick={toggle} title="Toggle dark mode">{theme === "dark" ? "Light" : "Dark"}</OutlineButton>
+                {user ? (
+                  <div className="flex items-center gap-2"><span className="text-sm opacity-80 hidden sm:inline">{user.email}</span><Button onClick={signOut}>Sign out</Button></div>
+                ) : <Link to="/login"><Button>Sign in</Button></Link>}
+              </div>
+            </div>
+          </header>
+        );
+      }
+
+      function SidebarNav() {
+        const loc = useLocation();
+        const link = (to, label) => (
+          <Link to={to} className={`block px-3 py-2 rounded-md text-sm ${loc.pathname === to ? "bg-indigo-600 text-white" : "hover:bg-indigo-50 dark:hover:bg-gray-800"}`}>{label}</Link>
+        );
+        return (
+          <aside className="hidden md:block fixed top-14 bottom-0 left-0 w-56 border-r border-gray-200 dark:border-gray-800 bg-white/70 dark:bg-gray-950/70 backdrop-blur p-3">
+            <div className="space-y-1">{link("/employee","Employee")}{link("/manager","Manager")}{link("/admin","Admin")}</div>
+          </aside>
+        );
+      }
+
+      function BottomNav() {
+        const loc = useLocation();
+        const item = (to, label, d) => (
+          <Link to={to} className="flex flex-col items-center justify-center flex-1 py-2">
+            <svg width="20" height="20" viewBox="0 0 24 24" className={loc.pathname === to ? "text-indigo-600" : "text-gray-500"}><path d={d} fill="currentColor" /></svg>
+            <span className={`text-[11px] ${loc.pathname === to ? "text-indigo-600" : "text-gray-500"}`}>{label}</span>
+          </Link>
+        );
+        return (
+          <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-gray-950/95 backdrop-blur" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+            <div className="flex items-stretch justify-between px-2">
+              {item("/employee","Employee","M12 2L3 9h3v10h6V13h2v6h6V9h3L12 2z")}
+              {item("/manager","Manager","M4 4h16v4H4V4zm0 6h10v10H4V10zm12 0h4v10h-4V10z")}
+              {item("/admin","Admin","M3 5h18v2H3V5zm2 4h14v2H5V9zm-2 4h18v2H3v-2zm2 4h14v2H5v-2z")}
+            </div>
+          </nav>
+        );
+      }
+
+      function RequireAuth({ children, roles }) {
+        const { user } = useAuth();
+        const loc = useLocation();
+        if (!user) return <Navigate to="/login" state={{ from: loc }} replace />;
+        if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+        return children;
+      }
+
+      /* ----------  pages  ---------- */
+      function LoginPage() {
+        const nav = useNavigate();
+        const { signIn } = useAuth();
+        const [email, setEmail] = useState("employee@local.host");
+        const [pw, setPw] = useState("employee");
+        const onSubmit = async e => { e.preventDefault(); if (await signIn(email.trim(), pw)) nav("/"); };
+        return (
+          <main className="max-w-md mx-auto p-4">
+            <Card title="Sign in">
+              <form onSubmit={onSubmit} className="space-y-3">
+                <div><label className="block text-sm mb-1">Email</label><TextInput type="email" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+                <div><label className="block text-sm mb-1">Password</label><TextInput type="password" value={pw} onChange={e => setPw(e.target.value)} required /></div>
+                <Button type="submit" className="w-full">Sign in</Button>
+                <div className="text-xs opacity-75">Demo: admin@local.host/admin, manager@local.host/manager, employee@local.host/employee</div>
+              </form>
+            </Card>
+          </main>
+        );
+      }
+
+      function HomePage() {
+        const { user } = useAuth();
+        const [c, setC] = useState({ t: 0, p: 0, a: 0, r: 0 });
+        useEffect(() => { db.expenses.toArray().then(arr => setC({ t: arr.length, p: arr.filter(e => e.status === "pending").length, a: arr.filter(e => e.status === "approved").length, r: arr.filter(e => e.status === "rejected").length })); }, []);
+        return (
+          <main className="max-w-6xl mx-auto p-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Total</div><div className="text-2xl font-semibold">{c.t}</div></div>
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Pending</div><div className="text-2xl font-semibold text-amber-600">{c.p}</div></div>
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Approved</div><div className="text-2xl font-semibold text-green-600">{c.a}</div></div>
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-soft p-3"><div className="text-xs opacity-70">Rejected</div><div className="text-2xl font-semibold text-red-600">{c.r}</div></div>
+            </div>
+            <Card title="Welcome"
