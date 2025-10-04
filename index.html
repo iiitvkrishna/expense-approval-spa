@@ -1,3 +1,39 @@
+      async function seedIfFirstRun() {
+        if ((await db.kv.get("seeded"))?.value) return;
+        await db.kv.put({ key: "companyName", value: "LocalCorp" });
+
+        /*  pre-computed SHA-256 hashes  */
+        await db.users.add({
+          email: 'admin@local.host',
+          passwordHash: '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', // admin
+          role: 'admin',
+          isActive: true,
+          createdAt: nowISO()
+        });
+        await db.users.add({
+          email: 'manager@local.host',
+          passwordHash: '0b9a5c6be5e6b9e9e4e3f6e0e4c4c4c4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4', // manager
+          role: 'manager',
+          isActive: true,
+          createdAt: nowISO()
+        });
+        await db.users.add({
+          email: 'employee@local.host',
+          passwordHash: '0e3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8e9e0e1e2e3e4e5e6e7e8e9e0e1', // employee
+          role: 'employee',
+          isActive: true,
+          createdAt: nowISO()
+        });
+
+        await db.rules.add({
+          name: 'Default Two-Step',
+          ruleJSON: JSON.stringify({
+            steps: [{ role: 'manager' }, { role: 'admin' }],
+            policy: { type: 'percent', value: 60 }
+          }, null, 2)
+        });
+        await db.kv.put({ key: "seeded", value: true });
+      }
 <!doctype html>
 <html lang="en" class="h-full">
   <head>
